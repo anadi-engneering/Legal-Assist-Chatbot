@@ -1,0 +1,4 @@
+botbuilder-core
+botbuilder-schema
+botbuilder-dialogs
+botbuilder-ai
