@@ -2,3 +2,7 @@ botbuilder-core
 botbuilder-schema
 botbuilder-dialogs
 botbuilder-ai
+flask 
+azure-search-documents 
+azure-cosmos 
+azure-ai-language-conversations

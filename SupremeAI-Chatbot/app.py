@@ -1,40 +1,76 @@
-from flask import Flask, render_template, request
-from botbuilder.core import BotFrameworkAdapterSettings, ConversationState, MemoryStorage
-from botbuilder.schema import Activity
-from botbuilder.core.integration import aiohttp_channel_service_routes, BotFrameworkHttpAdapter
-
-from bot import LegalInsightBot
+from flask import Flask, render_template, request, jsonify
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.cosmos import CosmosClient
+from azure.ai.language.conversations import ConversationAnalysisClient
+import os
 
 app = Flask(__name__)
 
-# Bot Setup
-SETTINGS = BotFrameworkAdapterSettings("", "")
-ADAPTER = BotFrameworkHttpAdapter(SETTINGS)
-CONVERSATION_STATE = ConversationState(MemoryStorage())
-BOT = LegalInsightBot()
+# Azure AI Search setup
+search_endpoint = os.environ["AZURE_SEARCH_SERVICE_ENDPOINT"]
+search_key = os.environ["AZURE_SEARCH_API_KEY"]
+search_index_name = os.environ["AZURE_SEARCH_INDEX_NAME"]
+search_credential = AzureKeyCredential(search_key)
+search_client = SearchClient(search_endpoint, search_index_name, search_credential)
 
-# Existing routes
+# Azure Cosmos DB setup
+cosmos_endpoint = os.environ["COSMOS_ENDPOINT"]
+cosmos_key = os.environ["COSMOS_KEY"]
+cosmos_client = CosmosClient(cosmos_endpoint, cosmos_key)
+database = cosmos_client.get_database_client("LegalAssistDB")
+container = database.get_container_client("Conversations")
+
+# Azure AI Language setup
+ai_endpoint = os.environ["AZURE_AI_ENDPOINT"]
+ai_key = os.environ["AZURE_AI_KEY"]
+ai_client = ConversationAnalysisClient(ai_endpoint, AzureKeyCredential(ai_key))
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ... other routes ...
+@app.route('/ask', methods=['POST'])
+def ask():
+    user_query = request.json['query']
+    language = request.json['language']
 
-# Bot endpoint
-@app.route("/api/messages", methods=["POST"])
-def messages():
-    if "application/json" in request.headers["Content-Type"]:
-        body = request.json
-    else:
-        return Response(status=415)
+    # Perform search using Azure AI Search
+    search_results = search_client.search(user_query, top=3)
+    context = " ".join([result['content'] for result in search_results])
 
-    activity = Activity().deserialize(body)
-    auth_header = request.headers["Authorization"] if "Authorization" in request.headers else ""
+    # Use Azure AI Language for response generation
+    result = ai_client.analyze_conversation(
+        task={
+            "kind": "Conversation",
+            "analysisInput": {
+                "conversationItem": {
+                    "text": user_query,
+                    "id": "1",
+                    "participantId": "user1"
+                },
+                "isLoggingEnabled": False
+            },
+            "parameters": {
+                "projectName": "LegalAssistProject",
+                "deploymentName": "production",
+                "verbose": True
+            }
+        }
+    )
 
-    response = await ADAPTER.process_activity(activity, auth_header, BOT.on_turn)
-    if response:
-        return jsonify(response.body)
-    return Response(status=201)
+    # Store conversation in Cosmos DB
+    container.create_item({
+        "id": str(result.conversation_id),
+        "query": user_query,
+        "response": result.prediction.top_intent,
+        "language": language
+    })
+
+    return jsonify({
+        "response": result.prediction.top_intent,
+        "context": context
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)
