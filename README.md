@@ -52,6 +52,7 @@ The chatbot is built using Azure's scalable cloud platform, enabling it to handl
 
 ## Architecture
 
+![](./Images/Legal_Chatbot.png)
 The Legal Assist Chatbot follows a multi-stage RAG architecture leveraging Azure services:
 
 1. **Question Input:** The user poses a legal question through the Flask web interface.
